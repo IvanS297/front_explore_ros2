@@ -4,6 +4,10 @@
 
 ---
 
+![demo](images/frontier_exploration_demo.png)
+
+---
+
 ## Структура пакетов
 
 ```
