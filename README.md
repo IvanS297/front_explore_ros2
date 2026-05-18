@@ -182,3 +182,10 @@ sudo apt install python3-tf-transformations ros-jazzy-tf2-tools
 - Карта должна содержать достаточно свободных клеток (`0`) для нахождения фронтиров — при слишком маленькой карте (первые секунды после старта SLAM) фронтиры не обнаруживаются
 - `MIN_PATH_LENGTH = 12` клеток — очень короткие пути к фронтирам отбрасываются
 - Исследование завершается автоматически после 30 неудачных попыток подряд
+
+---
+
+## Источники
+
+- [Expanding wavefront frontier exploration](https://opus.lib.uts.edu.au/bitstream/10453/30533/1/quinACRA2014.pdf)
+- [Pure Pursuit](https://www.ri.cmu.edu/pub_files/pub3/coulter_r_craig_1992_1/coulter_r_craig_1992_1.pdf)
