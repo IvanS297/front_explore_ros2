@@ -25,7 +25,7 @@ class FrontierExploration(Node):
         """
 
         # Set if in debug mode
-        self.declare_parameter('debug', 'false')
+        self.declare_parameter('debug', True)
         self.is_in_debug_mode = self.get_parameter('debug').value == 'true'
 
         # Publishers
@@ -81,7 +81,7 @@ class FrontierExploration(Node):
 
     def save_map(self):
         # Get the path of the current package
-        package_share = get_package_share_directory('lab4')
+        package_share = get_package_share_directory('frontier_exploration')
 
         # Construct the path to the map
         map_path = os.path.join(package_share, 'map', 'map')
@@ -89,7 +89,7 @@ class FrontierExploration(Node):
             os.makedirs(os.path.dirname(map_path))
 
         # Run map_saver
-        subprocess.call(["rosrun", "map_server", "map_saver", "-f", map_path])
+        subprocess.call(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", map_path])
 
         self.update_odometry()
 
@@ -103,7 +103,7 @@ class FrontierExploration(Node):
         roll, pitch, yaw = euler_from_quaternion(
             [orientation.x, orientation.y, orientation.z, orientation.w]
         )
-        with open(os.path.join(package_path, "map/pose.txt"), "w") as f:
+        with open(os.path.join(package_share, "map/pose.txt"), "w") as f:
             f.write(f"{position.x} {position.y} {position.z} {yaw} {pitch} {roll}\n")
 
     @staticmethod
@@ -272,7 +272,9 @@ class FrontierExploration(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = FrontierExploration()
-    node.run()
+    thread = threading.Thread(target=node.run, daemon=True)
+    thread.start()
+    rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
 

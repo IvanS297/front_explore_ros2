@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
 import math
+import threading
 import rclpy
 from rclpy.node import Node
 import numpy as np
 from .path_planner import PathPlanner
 from std_msgs.msg import Header, Bool
 from nav_msgs.msg import Path, Odometry, GridCells, OccupancyGrid
-from geometry_msgs.msg import Point, PointStamped, Twist, Vector3, Pose, Quaternion
+from geometry_msgs.msg import Point, PointStamped, Twist, TwistStamped, Vector3, Pose, Quaternion
 from tf_transformations import euler_from_quaternion
-from tf2_ros import transform_listener
+import time
+from tf2_ros import Buffer, TransformListener
+from tf2_ros import TransformException
 
 class PurePursuit(Node):
     def __init__(self):
@@ -22,15 +25,15 @@ class PurePursuit(Node):
         self.is_in_debug_mode = True
 
         # Publishers
-        self.cmd_vel = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cmd_vel = self.create_publisher(TwistStamped, "/cmd_vel", 10)
         self.lookahead_pub = self.create_publisher(PointStamped, "/pure_pursuit/lookahead", 10)
 
         if self.is_in_debug_mode:
             self.fov_cells_pub = self.create_publisher(
-                "/pure_pursuit/fov_cells", GridCells, 100
+                GridCells, "/pure_pursuit/fov_cells", 100
             )
             self.close_wall_cells_pub = self.create_publisher(
-                "/pure_pursuit/close_wall_cells", GridCells, 100
+                GridCells, "/pure_pursuit/close_wall_cells", 100
             )
 
         # Subscribers
@@ -58,7 +61,8 @@ class PurePursuit(Node):
         self.SMALL_FOV = 300  # degrees
         self.SMALL_FOV_DISTANCE = 10  # Number of grid cells
 
-        self.tf_listener = transform_listener.TransformListener()
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.pose = None
         self.map = None
         self.path = Path()
@@ -72,15 +76,17 @@ class PurePursuit(Node):
         Updates the current pose of the robot.
         """
         try:
-            (trans, rot) = self.tf_listener.lookupTransform(
-                "/map", "/base_footprint", rclpy.time.Time()
+            trans = self.tf_buffer.lookup_transform(
+                "map", "base_footprint", rclpy.time.Time()
             )
-        except:
+        except TransformException:
             return
 
+        translation = trans.transform.translation
+        rotation = trans.transform.rotation
         self.pose = Pose(
-            position=Point(x=trans[0], y=trans[1]),
-            orientation=Quaternion(x=rot[0], y=rot[1], z=rot[2], w=rot[3]),
+            position=Point(x=translation.x, y=translation.y),
+            orientation=Quaternion(x=rotation.x, y=rotation.y, z=rotation.z, w=rotation.w),
         )
 
     def update_map(self, msg: OccupancyGrid):
@@ -241,36 +247,44 @@ class PurePursuit(Node):
         return poses[len(poses) - 1].pose.position
 
     def send_speed(self, linear_speed: float, angular_speed: float):
-        """
-        Sends the speeds to the motors.
-        :param linear_speed  [float] [m/s]   The forward linear speed.
-        :param angular_speed [float] [rad/s] The angular speed for rotating around the body center.
-        """
-        twist = Twist(linear=Vector3(x=linear_speed), angular=Vector3(z=angular_speed))
-        self.cmd_vel.publish(twist)
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "base_footprint"
+        msg.twist.linear.x = linear_speed
+        msg.twist.angular.z = angular_speed
+        self.cmd_vel.publish(msg)
 
     def stop(self):
         self.send_speed(0, 0)
 
     def run(self):
-        self.sleep(5)
+        time.sleep(5)
+        rate = self.create_rate(20)  # 20 Hz
 
-        while not rclpy.is_shutdown():
+        while rclpy.ok():
             if self.pose is None:
+                self.get_logger().warn("pure_pursuit: waiting for pose...", throttle_duration_sec=2.0)
+                rate.sleep()
                 continue
 
             # If not enabled, do nothing
             if not self.enabled:
+                rate.sleep()
                 continue
 
             # If no path, stop
             if self.path is None or not self.path.poses:
                 self.stop()
+                rate.sleep()
                 continue
 
             goal = self.get_goal()
 
             nearest_waypoint_index = self.find_nearest_waypoint_index()
+            if nearest_waypoint_index < 0:
+                rate.sleep()
+                continue
+
             lookahead = self.find_lookahead(
                 nearest_waypoint_index, self.LOOKAHEAD_DISTANCE
             )
@@ -300,6 +314,9 @@ class PurePursuit(Node):
 
             # Calculate the lookahead distance and center of curvature
             lookahead_distance = PurePursuit.distance(x, y, lookahead.x, lookahead.y)
+            if lookahead_distance < 1e-6 or abs(np.sin(self.alpha)) < 1e-6:
+                rate.sleep()
+                continue
             radius_of_curvature = float(lookahead_distance / (2 * np.sin(self.alpha)))
 
             # Calculate drive speed
@@ -309,12 +326,13 @@ class PurePursuit(Node):
             distance_to_goal = PurePursuit.distance(x, y, goal.x, goal.y)
             if distance_to_goal < self.DISTANCE_TOLERANCE:
                 self.stop()
+                rate.sleep()
                 continue
 
             # Calculate turn speed
             turn_speed = self.TURN_SPEED_KP * drive_speed / radius_of_curvature
 
-            # Obstacle avoicance
+            # Obstacle avoidance
             turn_speed += self.calculate_steering_adjustment()
 
             # Clamp turn speed
@@ -333,13 +351,20 @@ class PurePursuit(Node):
                     )
                 )
 
+            self.get_logger().info(
+                f"Sending cmd_vel: linear={drive_speed:.3f}, angular={turn_speed:.3f}",
+                throttle_duration_sec=1.0
+            )
             # Send speed
             self.send_speed(drive_speed, turn_speed)
+            rate.sleep()
 
 def main():
     rclpy.init()
     node = PurePursuit()
-    node.run()
+    thread = threading.Thread(target=node.run, daemon=True)
+    thread.start()
+    rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
 

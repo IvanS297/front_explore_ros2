@@ -2,6 +2,7 @@
 
 import rclpy
 import math
+import logging
 import cv2
 import numpy as np
 from typing import Union
@@ -57,7 +58,7 @@ class PathPlanner:
         """
         x = (p[0] + 0.5) * mapdata.info.resolution + mapdata.info.origin.position.x
         y = (p[1] + 0.5) * mapdata.info.resolution + mapdata.info.origin.position.y
-        return Point(x, y, 0)
+        return Point(x=x, y=y, z=0.0)
 
     @staticmethod
     def world_to_grid(mapdata: OccupancyGrid, wp: Point) -> "tuple[int, int]":
@@ -95,7 +96,7 @@ class PathPlanner:
                     header=Header(frame_id="map"),
                     pose=Pose(
                         position=PathPlanner.grid_to_world(mapdata, cell),
-                        orientation=Quaternion(q[0], q[1], q[2], q[3]),
+                        orientation=Quaternion(x=q[0], y=q[1], z=q[2], w=q[3]),
                     ),
                 )
             )
@@ -234,47 +235,52 @@ class PathPlanner:
         :return        [OccupancyGrid] The C-Space.
         """
         PADDING = 5  # The number of cells around the obstacles
-
+ 
         # Create numpy grid from mapdata
         width = mapdata.info.width
         height = mapdata.info.height
-        map = np.array(mapdata.data).reshape(width, height).astype(np.uint8)
-
+        map = np.array(mapdata.data).reshape(height, width).astype(np.uint8)
+ 
         # Get mask of unknown areas
         unknown_area_mask = cv2.inRange(
             map, 255, 255
         )  # -1 overflows to 255 when cast to uint8
         kernel = np.ones((PADDING, PADDING), dtype=np.uint8)
         unknown_area_mask = cv2.erode(unknown_area_mask, kernel, iterations=1)
-
+ 
         # Change unknown areas to free space
         map[map == 255] = 0
-
+ 
         # Inflate the obstacles where necessary
         kernel = np.ones((PADDING, PADDING), np.uint8)
         obstacle_mask = cv2.dilate(map, kernel, iterations=1)
         cspace_data = cv2.bitwise_or(obstacle_mask, unknown_area_mask)
-        cspace_data = np.array(cspace_data).reshape(width * height).tolist()
-
+        # OccupancyGrid.data is int8 (-128..127); uint8 value 255 overflows.
+        # Restore unknown cells (-1) and clamp obstacle cells to 100.
+        cspace_np = cspace_data.flatten().astype(np.int16)
+        cspace_np[unknown_area_mask.flatten() > 0] = -1
+        cspace_np[(cspace_np > 0) & (cspace_np != -1)] = 100
+        cspace_list = cspace_np.astype(np.int8).tolist()
+ 
         # Return the C-space
         cspace = OccupancyGrid(
-            header=mapdata.header, info=mapdata.info, data=cspace_data
+            header=mapdata.header, info=mapdata.info, data=cspace_list
         )
-
+ 
         # Return the cells that were added to the original map
         cspace_cells = None
         if include_cells:
             cells = []
-
+ 
             # Find the indices of the obstacle cells
             obstacle_indices = np.where(obstacle_mask > 0)
-
+ 
             # Convert the indices to cell coordinates and append them to cells
             for y, x in zip(*obstacle_indices):
                 cells.append((x, y))
-
+ 
             cspace_cells = PathPlanner.get_grid_cells(mapdata, cells)
-
+ 
         return (cspace, cspace_cells)
 
     @staticmethod
@@ -291,7 +297,7 @@ class PathPlanner:
 
     @staticmethod
     def calc_cost_map(mapdata: OccupancyGrid) -> np.ndarray:
-        rclpy.logging.get_logger().info("Calculating cost map")
+        logging.getLogger().info("Calculating cost map")
 
         # Create numpy array from mapdata
         width = mapdata.info.width
@@ -451,7 +457,7 @@ class PathPlanner:
             goal = PathPlanner.get_first_walkable_neighbor(mapdata, goal)
 
         pq = PriorityQueue()
-        pq.put(start, 0)
+        pq.put((0, start))
 
         cost_so_far = {}
         distance_cost_so_far = {}
@@ -461,7 +467,7 @@ class PathPlanner:
         came_from[start] = None
 
         while not pq.empty():
-            current = pq.get()
+            current = pq.get()[1]
 
             if current == goal:
                 break
@@ -481,7 +487,7 @@ class PathPlanner:
                         distance_cost_so_far[current] + distance
                     )
                     priority = new_cost + PathPlanner.euclidean_distance(neighbor, goal)
-                    pq.put(neighbor, priority)
+                    pq.put((priority, neighbor))
                     came_from[neighbor] = current
 
         path = []
