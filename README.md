@@ -193,3 +193,4 @@ sudo apt install python3-tf-transformations ros-jazzy-tf2-tools
 
 - [Expanding wavefront frontier exploration](https://opus.lib.uts.edu.au/bitstream/10453/30533/1/quinACRA2014.pdf)
 - [Pure Pursuit](https://www.ri.cmu.edu/pub_files/pub3/coulter_r_craig_1992_1/coulter_r_craig_1992_1.pdf)
+- Этот код - модификация от [Kai Nakamura](https://kainakamura.com/project/slam-robot), но у него код для `ROS1 Noetic` и нету репозитория
