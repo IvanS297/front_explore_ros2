@@ -250,8 +250,8 @@ class PurePursuit(Node):
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "base_footprint"
-        msg.twist.linear.x = linear_speed
-        msg.twist.angular.z = angular_speed
+        msg.twist.linear.x = float(linear_speed)
+        msg.twist.angular.z = float(angular_speed)
         self.cmd_vel.publish(msg)
 
     def stop(self):
