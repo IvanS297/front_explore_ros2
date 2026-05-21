@@ -5,8 +5,6 @@
 ---
 
 ![demo](images/frontier_exploration_demo.png)
-Список параметров:
- - MIN_FRONTIER_SIZE
 ---
 
 ## Параметры
