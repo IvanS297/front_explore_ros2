@@ -21,10 +21,40 @@ class PurePursuit(Node):
         """
         super().__init__("pure_persuit")
         
-        # Set if in debug mode
-        self.is_in_debug_mode = True
+        # ── Параметры — читаются из params.yaml ─────────────
+        self.declare_parameter('debug', False)
+        self.declare_parameter('lookahead_distance', 0.35)
+        self.declare_parameter('wheel_base', 0.19)
+        self.declare_parameter('max_drive_speed', 0.08)
+        self.declare_parameter('max_turn_speed', 0.8)
+        self.declare_parameter('turn_speed_kp', 1.25)
+        self.declare_parameter('distance_tolerance', 0.1)
+        self.declare_parameter('obstacle_avoidance_gain', 0.3)
+        self.declare_parameter('obstacle_avoidance_max_slow_down_distance', 0.20)
+        self.declare_parameter('obstacle_avoidance_min_slow_down_distance', 0.12)
+        self.declare_parameter('obstacle_avoidance_min_slow_down_factor', 0.25)
+        self.declare_parameter('fov', 200)
+        self.declare_parameter('fov_distance', 25)
+        self.declare_parameter('fov_deadzone', 80)
+        self.declare_parameter('small_fov', 300)
+        self.declare_parameter('small_fov_distance', 10)
 
-        # Publishers
+        self.is_in_debug_mode                          = bool(self.get_parameter('debug').value)
+        self.LOOKAHEAD_DISTANCE                        = self.get_parameter('lookahead_distance').value
+        self.WHEEL_BASE                                = self.get_parameter('wheel_base').value
+        self.MAX_DRIVE_SPEED                           = self.get_parameter('max_drive_speed').value
+        self.MAX_TURN_SPEED                            = self.get_parameter('max_turn_speed').value
+        self.TURN_SPEED_KP                             = self.get_parameter('turn_speed_kp').value
+        self.DISTANCE_TOLERANCE                        = self.get_parameter('distance_tolerance').value
+        self.OBSTACLE_AVOIDANCE_GAIN                   = self.get_parameter('obstacle_avoidance_gain').value
+        self.OBSTACLE_AVOIDANCE_MAX_SLOW_DOWN_DISTANCE = self.get_parameter('obstacle_avoidance_max_slow_down_distance').value
+        self.OBSTACLE_AVOIDANCE_MIN_SLOW_DOWN_DISTANCE = self.get_parameter('obstacle_avoidance_min_slow_down_distance').value
+        self.OBSTACLE_AVOIDANCE_MIN_SLOW_DOWN_FACTOR   = self.get_parameter('obstacle_avoidance_min_slow_down_factor').value
+        self.FOV                                       = self.get_parameter('fov').value
+        self.FOV_DISTANCE                              = self.get_parameter('fov_distance').value
+        self.FOV_DEADZONE                              = self.get_parameter('fov_deadzone').value
+        self.SMALL_FOV                                 = self.get_parameter('small_fov').value
+        self.SMALL_FOV_DISTANCE                        = self.get_parameter('small_fov_distance').value
         self.cmd_vel = self.create_publisher(TwistStamped, "/cmd_vel", 10)
         self.lookahead_pub = self.create_publisher(PointStamped, "/pure_pursuit/lookahead", 10)
 
@@ -41,25 +71,6 @@ class PurePursuit(Node):
         self.create_subscription(OccupancyGrid, "/map", self.update_map, 10)
         self.create_subscription(Path, "/pure_pursuit/path", self.update_path, 10)
         self.create_subscription(Bool, "/pure_pursuit/enabled", self.update_enabled, 10)
-
-        # Pure pursuit parameters
-        self.LOOKAHEAD_DISTANCE = 0.18  # m
-        self.WHEEL_BASE = 0.16  # m
-        self.MAX_DRIVE_SPEED = 0.1  # m/s
-        self.MAX_TURN_SPEED = 1.25  # rad/s
-        self.TURN_SPEED_KP = 1.25
-        self.DISTANCE_TOLERANCE = 0.1  # m
-
-        # Obstacle avoidance parameters
-        self.OBSTACLE_AVOIDANCE_GAIN = 0.3
-        self.OBSTACLE_AVOIDANCE_MAX_SLOW_DOWN_DISTANCE = 0.16  # m
-        self.OBSTACLE_AVOIDANCE_MIN_SLOW_DOWN_DISTANCE = 0.12  # m
-        self.OBSTACLE_AVOIDANCE_MIN_SLOW_DOWN_FACTOR = 0.25
-        self.FOV = 200  # degrees
-        self.FOV_DISTANCE = 25  # Number of grid cells
-        self.FOV_DEADZONE = 80  # degrees
-        self.SMALL_FOV = 300  # degrees
-        self.SMALL_FOV_DISTANCE = 10  # Number of grid cells
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)

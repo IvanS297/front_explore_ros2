@@ -25,8 +25,25 @@ class FrontierExploration(Node):
         """
 
         # Set if in debug mode
-        self.declare_parameter('debug', True)
-        self.is_in_debug_mode = self.get_parameter('debug').value == 'true'
+        self.declare_parameter('debug', False)
+        self.is_in_debug_mode = bool(self.get_parameter('debug').value)
+
+        # ── Параметры — читаются из params.yaml ─────────────
+        self.declare_parameter('num_explore_fails_before_finish', 60)
+        self.declare_parameter('min_map_cells', 300)
+        self.declare_parameter('min_frontier_size', 3)
+        self.declare_parameter('max_frontiers_to_check', 8)
+        self.declare_parameter('a_star_cost_weight', 10.0)
+        self.declare_parameter('frontier_size_cost_weight', 1.0)
+        self.declare_parameter('exploration_rate', 2.0)
+
+        self.NUM_EXPLORE_FAILS_BEFORE_FINISH = self.get_parameter('num_explore_fails_before_finish').value
+        self.MIN_MAP_CELLS                   = self.get_parameter('min_map_cells').value
+        self.MIN_FRONTIER_SIZE               = self.get_parameter('min_frontier_size').value
+        self.MAX_FRONTIERS_TO_CHECK          = self.get_parameter('max_frontiers_to_check').value
+        self.A_STAR_COST_WEIGHT              = self.get_parameter('a_star_cost_weight').value
+        self.FRONTIER_SIZE_COST_WEIGHT       = self.get_parameter('frontier_size_cost_weight').value
+        self.EXPLORATION_RATE                = self.get_parameter('exploration_rate').value
 
         # Publishers
         self.pure_pursuit_pub = self.create_publisher(Path, '/pure_pursuit/path', 10)
@@ -48,24 +65,31 @@ class FrontierExploration(Node):
         self.pose = None
         self.map = None
 
-        self.NUM_EXPLORE_FAILS_BEFORE_FINISH = 30
         self.no_path_found_counter = 0
         self.no_frontiers_found_counter = 0
         self.is_finished_exploring = False
+        self._tf_ready = False
 
     def update_odometry(self, msg: "Union[Odometry, None]" = None):
         """
         Updates the current pose of the robot.
         """
         try:
-            when = rclpy.time.Time()
-            trans = self.tf_buffer.lookup_transform("map", "base_footprint", when)
+            trans = self.tf_buffer.lookup_transform(
+                "map", "base_footprint",
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=0.1)
+            )
         except TransformException as ex:
-            self.get_logger().warn(f"TF error: {ex}")
+            # Логируем редко — не засоряем терминал
+            self.get_logger().warn(
+                f"TF error: {ex}", throttle_duration_sec=3.0
+            )
+            self._tf_ready = False
             return
         translation = trans.transform.translation
         rotation = trans.transform.rotation
-
+        self._tf_ready = True
         self.pose = Pose(
             position=Point(x=translation.x, y=translation.y),
             orientation=rotation
@@ -165,8 +189,8 @@ class FrontierExploration(Node):
         else:
             self.no_frontiers_found_counter = 0
 
-        A_STAR_COST_WEIGHT = 10.0
-        FRONTIER_SIZE_COST_WEIGHT = 1.0
+        A_STAR_COST_WEIGHT = self.A_STAR_COST_WEIGHT
+        FRONTIER_SIZE_COST_WEIGHT = self.FRONTIER_SIZE_COST_WEIGHT
 
         # Calculate the C-space
         cspace, cspace_cells = PathPlanner.calc_cspace(self.map, self.is_in_debug_mode)
@@ -186,7 +210,7 @@ class FrontierExploration(Node):
         best_path = None
 
         # Check only the top frontiers in terms of size
-        MAX_NUM_FRONTIERS_TO_CHECK = 8
+        MAX_NUM_FRONTIERS_TO_CHECK = self.MAX_FRONTIERS_TO_CHECK
         top_frontiers = FrontierExploration.get_top_frontiers(
             frontiers, MAX_NUM_FRONTIERS_TO_CHECK
         )
@@ -243,30 +267,70 @@ class FrontierExploration(Node):
             self.check_if_finished_exploring()
 
     def run(self):
-        rate = self.create_rate(20) # Hz
+        rate = self.create_rate(self.EXPLORATION_RATE)
         while rclpy.ok():
-            if self.pose is None or self.map is None:
+
+            # ── 1. Ждём TF ────────────────────────────────────────────────
+            if not self._tf_ready or self.pose is None:
+                self.get_logger().info(
+                    "Жду TF map→base_footprint...",
+                    throttle_duration_sec=3.0
+                )
+                rate.sleep()
                 continue
 
-            # Get the start position of the robot
-            start = PathPlanner.world_to_grid(self.map, self.pose.position)
+            # ── 2. Ждём карту ─────────────────────────────────────────────
+            if self.map is None:
+                self.get_logger().info(
+                    "Жду карту...", throttle_duration_sec=3.0
+                )
+                rate.sleep()
+                continue
 
-            # Get frontiers
+            map_cells = self.map.info.width * self.map.info.height
+            if map_cells < self.MIN_MAP_CELLS:
+                self.get_logger().info(
+                    f"Карта {self.map.info.width}x{self.map.info.height}"
+                    f" ({map_cells} кл.) — слишком маленькая, жду {self.MIN_MAP_CELLS}+",
+                    throttle_duration_sec=3.0
+                )
+                rate.sleep()
+                continue
+
+            # ── 3. Проверяем что стартовая клетка внутри карты ───────────
+            start = PathPlanner.world_to_grid(self.map, self.pose.position)
+            if not PathPlanner.is_cell_in_bounds(self.map, start):
+                self.get_logger().warn(
+                    f"Робот вне карты: grid={start}, "
+                    f"карта {self.map.info.width}x{self.map.info.height}",
+                    throttle_duration_sec=3.0
+                )
+                rate.sleep()
+                continue
+
+            # ── 4. BFS поиск фронтиров ────────────────────────────────────
             frontier_list, frontier_cells = FrontierSearch.search(
-                self.map, start, self.is_in_debug_mode
+                self.map, start, self.is_in_debug_mode, self.MIN_FRONTIER_SIZE
             )
 
             if frontier_list is None:
+                rate.sleep()
                 continue
 
-            # Publish frontier cells if in debug mode
-            if self.is_in_debug_mode:
+            self.get_logger().info(
+                f"Фронтиров: {len(frontier_list.frontiers)} | "
+                f"Карта: {self.map.info.width}x{self.map.info.height} | "
+                f"Старт: {start} | "
+                f"Фейлов: {self.no_frontiers_found_counter}/{self.NUM_EXPLORE_FAILS_BEFORE_FINISH}",
+                throttle_duration_sec=2.0
+            )
+
+            if self.is_in_debug_mode and frontier_cells:
                 self.frontier_cells_pub.publish(
                     PathPlanner.get_grid_cells(self.map, frontier_cells)
                 )
 
             self.explore_frontier(frontier_list)
-
             rate.sleep()
 
 def main(args=None):

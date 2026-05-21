@@ -11,8 +11,9 @@ class FrontierSearch:
         mapdata: OccupancyGrid,
         start: "tuple[int, int]",
         include_frontier_cells: bool = False,
+        min_frontier_size: int = 3,
     ) -> "tuple[FrontierList, list[tuple[int, int]]]":
-        MIN_FRONTIER_SIZE = 8  # Number of cells
+        MIN_FRONTIER_SIZE = min_frontier_size
 
         # Create queue for breadth-first search
         queue = []
