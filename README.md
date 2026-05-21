@@ -170,34 +170,9 @@ ros2 run frontier_exploration pure_persuit \
   --ros-args -r /odom:=/diff_cont/odom -r /cmd_vel:=/diff_cont/cmd_vel
 ```
 
-### Launch файл (рекомендуется)
+### Launch файл
 
-Создай файл `launch/exploration.launch.py` в пакете:
-
-```python
-from launch import LaunchDescription
-from launch_ros.actions import Node
-
-def generate_launch_description():
-    return LaunchDescription([
-        Node(
-            package='frontier_exploration',
-            executable='frontier_exploration',
-            name='frontier_exploration',
-            remappings=[('/odom', '/diff_cont/odom')],
-            parameters=[{'debug': False}],
-        ),
-        Node(
-            package='frontier_exploration',
-            executable='pure_persuit',
-            name='pure_persuit',
-            remappings=[
-                ('/odom', '/diff_cont/odom'),
-                ('/cmd_vel', '/diff_cont/cmd_vel'),
-            ],
-        ),
-    ])
-```
+Есть `launch_exploration.launch.py`, который запускает и `frontier_exploration` и `pure_persuit` одновременно вместе с параметрами из yaml файла
 
 Запуск:
 ```bash
