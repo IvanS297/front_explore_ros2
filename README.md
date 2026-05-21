@@ -153,21 +153,17 @@ source install/setup.bash
 Запускать в отдельных терминалах. Перед запуском убедиться что SLAM уже запущен и топик `/map` публикуется.
 
 **Frontier Exploration:**
-```bash
-ros2 run frontier_exploration frontier_exploration \
-  --ros-args -r /odom:=/diff_cont/odom
-```
-
-С debug визуализацией:
-```bash
-ros2 run frontier_exploration frontier_exploration \
-  --ros-args -r /odom:=/diff_cont/odom -p debug:=true
+```bashros2 run frontier_exploration frontier_exploration \
+  --ros-args --params-file ~/ros2_ws/src/frontier_exploration/config/params.yaml \
+  -r /odom:=/diff_cont/odom
 ```
 
 **Pure Pursuit:**
 ```bash
 ros2 run frontier_exploration pure_persuit \
-  --ros-args -r /odom:=/diff_cont/odom -r /cmd_vel:=/diff_cont/cmd_vel
+  --ros-args --params-file ~/ros2_ws/src/frontier_exploration/config/params.yaml \
+  -r /odom:=/diff_cont/odom \
+  -r /cmd_vel:=/diff_cont/cmd_vel
 ```
 
 ### Launch файл
