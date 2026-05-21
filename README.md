@@ -176,7 +176,7 @@ ros2 run frontier_exploration pure_persuit \
 
 Запуск:
 ```bash
-ros2 launch frontier_exploration exploration.launch.py
+ros2 launch frontier_exploration launch_exploration.launch.py
 ```
 
 ---
